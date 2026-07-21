@@ -1,0 +1,696 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Treasure Hunt — map overlay & change finder</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+<style>
+  :root{
+    --bg:#12140f;
+    --panel:#191c15;
+    --panel-2:#20241b;
+    --line:#33392b;
+    --ink:#eceee4;
+    --ink-dim:#9aa08a;
+    --gold:#d8a24a;
+    --gold-ink:#1a1405;
+    --water:#4fb0ff;
+    --mono:"SFMono-Regular",ui-monospace,"Menlo",Consolas,monospace;
+    --sans:ui-sans-serif,system-ui,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    --serif:ui-serif,Georgia,"Times New Roman",serif;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{font-family:var(--sans);background:var(--bg);color:var(--ink);display:flex;flex-direction:column;height:100vh;overflow:hidden}
+
+  header{flex:0 0 auto;display:flex;align-items:center;gap:16px;padding:8px 14px;background:var(--bg);border-bottom:1px solid var(--line);min-height:52px}
+  .brand{display:flex;align-items:baseline;gap:9px;white-space:nowrap}
+  .brand .x{font-family:var(--serif);color:var(--gold);font-size:20px;font-weight:700;transform:translateY(1px)}
+  .brand b{font-family:var(--serif);font-weight:700;font-size:19px;letter-spacing:.3px}
+  .brand span{font-family:var(--mono);font-size:10px;color:var(--ink-dim);text-transform:uppercase;letter-spacing:2px}
+  .spacer{flex:1 1 auto}
+
+  .btn{font:inherit;font-size:13px;color:var(--ink);background:var(--panel-2);border:1px solid var(--line);
+       border-radius:8px;padding:7px 12px;cursor:pointer;display:inline-flex;align-items:center;gap:7px;
+       transition:border-color .15s,background .15s;white-space:nowrap}
+  .btn:hover{border-color:#4a5340}
+  .btn:disabled{opacity:.45;cursor:default}
+  .btn.gold{background:var(--gold);color:var(--gold-ink);border-color:var(--gold);font-weight:600}
+  .filebtn{position:relative;overflow:hidden}
+  .filebtn input[type=file]{position:absolute;inset:0;opacity:0;cursor:pointer;font-size:0}
+  .base{display:flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+  .base button{font:inherit;font-size:12px;background:transparent;color:var(--ink-dim);border:0;padding:7px 11px;cursor:pointer}
+  .base button.active{background:var(--panel-2);color:var(--ink)}
+
+  #map{flex:1 1 auto;background:#0b0d09}
+  .leaflet-container{background:#0b0d09}
+
+  /* hover tooltip */
+  #tip{position:fixed;z-index:3000;display:none;pointer-events:none;max-width:230px;background:#0c0e08;
+       border:1px solid var(--gold);color:var(--ink);font-size:12px;line-height:1.45;padding:7px 9px;border-radius:8px;
+       box-shadow:0 6px 20px rgba(0,0,0,.55)}
+  /* help modal */
+  .modal{position:fixed;inset:0;z-index:2500;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.62);backdrop-filter:blur(3px)}
+  .modal .sheet{width:min(700px,92vw);max-height:86vh;overflow-y:auto;background:var(--panel);border:1px solid var(--line);border-radius:16px}
+  .modal .sheet .hd{position:sticky;top:0;background:var(--panel);display:flex;align-items:center;gap:10px;padding:14px 18px;border-bottom:1px solid var(--line)}
+  .modal .sheet .hd .x{font-family:var(--serif);color:var(--gold);font-size:20px}
+  .modal .sheet .hd b{font-family:var(--serif);font-size:18px}
+  .modal .sheet .hd .close{margin-left:auto;background:var(--panel-2);border:1px solid var(--line);color:var(--ink);border-radius:8px;padding:5px 11px;cursor:pointer;font:inherit}
+  .modal .content{padding:16px 20px 26px;font-size:13.5px;line-height:1.6}
+  .modal .content h3{font-family:var(--serif);color:var(--gold);margin:20px 0 6px;font-size:15px}
+  .modal .content h3:first-child{margin-top:0}
+  .modal .content p{margin:0 0 8px}
+  .modal .content ul{margin:0 0 10px;padding-left:18px;color:var(--ink-dim)}
+  .modal .content li{margin:4px 0}
+  .modal .content li b{color:var(--ink)}
+  .modal .content code{font-family:var(--mono);font-size:12px;background:var(--panel-2);padding:1px 5px;border-radius:4px}
+  .ov{position:absolute;top:0;left:0;transform-origin:center center;pointer-events:none;
+      box-shadow:0 0 0 1px rgba(216,162,74,.5),0 6px 22px rgba(0,0,0,.5);will-change:left,top,width,height,transform}
+  .ov.dragging{cursor:grabbing !important}
+
+  /* left tool dock */
+  .tools{position:absolute;left:14px;bottom:32px;z-index:1000;display:flex;flex-direction:column;gap:8px;width:190px;max-height:calc(100vh - 110px);overflow-y:auto}
+  .toolgrid{display:grid;grid-template-columns:1fr 1fr;gap:6px;background:rgba(25,28,21,.94);border:1px solid var(--line);
+            border-radius:12px;padding:8px;backdrop-filter:blur(6px)}
+  .toolgrid button{font:inherit;font-size:12px;color:var(--ink-dim);background:transparent;border:1px solid transparent;
+                   border-radius:8px;padding:9px 4px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:3px}
+  .toolgrid button .ic{font-size:15px;line-height:1}
+  .toolgrid button.active{background:var(--panel-2);color:var(--gold);border-color:var(--line)}
+  .readout{background:rgba(25,28,21,.94);border:1px solid var(--line);border-radius:12px;padding:10px 12px;backdrop-filter:blur(6px)}
+  .readout .k{font-size:10px;font-family:var(--mono);letter-spacing:1.5px;text-transform:uppercase;color:var(--ink-dim)}
+  .readout .v{font-family:var(--mono);font-size:13px;color:var(--gold);margin-top:3px;word-break:break-all}
+  .hint{background:rgba(25,28,21,.94);border:1px solid var(--line);border-radius:12px;padding:10px 12px;
+        backdrop-filter:blur(6px);font-size:12px;color:var(--ink-dim);line-height:1.5}
+  .hint b{color:var(--ink)}
+
+  /* right panel */
+  .panel{position:absolute;right:14px;top:62px;bottom:14px;z-index:1000;width:280px;display:flex;flex-direction:column;gap:10px}
+  .card{background:rgba(25,28,21,.94);border:1px solid var(--line);border-radius:12px;backdrop-filter:blur(6px)}
+  .card h2{margin:0;padding:11px 13px;font-size:10px;font-family:var(--mono);letter-spacing:1.6px;text-transform:uppercase;
+           color:var(--ink-dim);display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--line)}
+  .card .body{padding:12px 13px}
+  #layersCard{flex:0 0 auto;max-height:38%;display:flex;flex-direction:column}
+  #layersCard .body{overflow-y:auto;padding:8px}
+  #settingsCard{flex:1 1 auto;overflow-y:auto}
+
+  .layer{display:flex;align-items:center;gap:8px;padding:7px 7px;border-radius:8px;cursor:pointer;border:1px solid transparent}
+  .layer:hover{background:var(--panel-2)}
+  .layer.active{background:var(--panel-2);border-color:var(--gold)}
+  .layer .sw{width:12px;height:12px;border-radius:3px;flex:0 0 auto;border:1px solid rgba(255,255,255,.2)}
+  .layer .nm{flex:1 1 auto;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .layer .eye,.layer .del{background:none;border:0;color:var(--ink-dim);cursor:pointer;font-size:13px;padding:2px 4px;border-radius:5px}
+  .layer .eye:hover,.layer .del:hover{color:var(--ink);background:rgba(255,255,255,.06)}
+  .layer .eye.off{opacity:.4}
+  .empty-layers{font-size:12px;color:var(--ink-dim);text-align:center;padding:16px 8px;line-height:1.5}
+
+  .ctl{margin-bottom:12px}
+  .ctl:last-child{margin-bottom:0}
+  .ctl label{display:flex;justify-content:space-between;font-size:12px;color:var(--ink-dim);margin-bottom:6px}
+  .ctl label var{font-family:var(--mono);color:var(--gold);font-style:normal}
+  input[type=range]{width:100%;-webkit-appearance:none;appearance:none;height:3px;border-radius:2px;background:var(--line);outline:none;margin:0}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:15px;height:15px;border-radius:50%;background:var(--gold);cursor:pointer;border:2px solid var(--panel)}
+  input[type=range]::-moz-range-thumb{width:15px;height:15px;border-radius:50%;background:var(--gold);cursor:pointer;border:2px solid var(--panel)}
+  .seg{display:flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+  .seg button{flex:1;font:inherit;font-size:12px;background:transparent;color:var(--ink-dim);border:0;border-right:1px solid var(--line);padding:8px 4px;cursor:pointer}
+  .seg button:last-child{border-right:0}
+  .seg button.active{background:var(--gold);color:var(--gold-ink);font-weight:600}
+  .subhead{font-size:10px;font-family:var(--mono);letter-spacing:1.4px;text-transform:uppercase;color:var(--ink-dim);margin:16px 0 9px}
+  .chips{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:9px;min-height:4px}
+  .chip{display:inline-flex;align-items:center;gap:5px;background:var(--panel-2);border:1px solid var(--line);border-radius:20px;padding:3px 6px 3px 4px;font-size:11px}
+  .chip .c{width:13px;height:13px;border-radius:50%;border:1px solid rgba(255,255,255,.25)}
+  .chip button{background:none;border:0;color:var(--ink-dim);cursor:pointer;font-size:13px;line-height:1;padding:0 1px}
+  .chip button:hover{color:#ff7a6a}
+  input[type=color]{width:100%;height:30px;padding:0;background:none;border:1px solid var(--line);border-radius:8px;cursor:pointer}
+  .row{display:flex;gap:7px}
+  .row .btn{flex:1;justify-content:center;font-size:12px;padding:8px}
+  .tiny{font-size:11px;color:var(--ink-dim);line-height:1.45;margin-top:8px}
+  .no-active{font-size:12px;color:var(--ink-dim);text-align:center;padding:24px 10px;line-height:1.5}
+
+  /* align banner */
+  .banner{position:absolute;left:50%;top:62px;transform:translateX(-50%);z-index:1200;background:var(--gold);color:var(--gold-ink);
+          font-size:13px;font-weight:600;padding:9px 16px;border-radius:10px;box-shadow:0 6px 20px rgba(0,0,0,.4);display:none;align-items:center;gap:12px}
+  .banner button{background:rgba(0,0,0,.15);border:0;color:var(--gold-ink);border-radius:6px;padding:4px 9px;font:inherit;font-size:12px;cursor:pointer}
+
+  /* claude chat */
+  .chat{position:absolute;right:14px;bottom:14px;z-index:1300;width:320px;display:none;flex-direction:column;
+        background:rgba(25,28,21,.97);border:1px solid var(--line);border-radius:12px;overflow:hidden;max-height:60vh}
+  .chat header{background:var(--panel-2);border-bottom:1px solid var(--line);padding:9px 12px;display:flex;align-items:center;gap:8px}
+  .chat header b{font-family:var(--serif);font-size:14px}
+  .chat header .close{margin-left:auto;background:none;border:0;color:var(--ink-dim);cursor:pointer;font-size:15px}
+  .chat .log{flex:1 1 auto;overflow-y:auto;padding:11px;display:flex;flex-direction:column;gap:9px;min-height:120px}
+  .msg{font-size:12.5px;line-height:1.5;padding:8px 10px;border-radius:9px;max-width:88%;white-space:pre-wrap}
+  .msg.u{align-self:flex-end;background:var(--gold);color:var(--gold-ink)}
+  .msg.a{align-self:flex-start;background:var(--panel-2);border:1px solid var(--line)}
+  .msg.sys{align-self:stretch;max-width:100%;background:transparent;color:var(--ink-dim);font-size:11.5px;text-align:center}
+  .chat .in{display:flex;gap:7px;padding:9px;border-top:1px solid var(--line)}
+  .chat .in input{flex:1;background:var(--bg);border:1px solid var(--line);border-radius:8px;color:var(--ink);padding:8px 10px;font:inherit;font-size:12.5px;outline:none}
+  .chat .in button{background:var(--gold);color:var(--gold-ink);border:0;border-radius:8px;padding:0 13px;font:inherit;font-weight:600;cursor:pointer}
+
+  .welcome{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;z-index:400;pointer-events:none}
+  .welcome div{max-width:380px;text-align:center;color:var(--ink-dim);font-size:13px;line-height:1.6;background:rgba(25,28,21,.85);
+    border:1px solid var(--line);border-radius:14px;padding:22px 24px}
+  .welcome b{color:var(--ink)}
+  .welcome .x{font-family:var(--serif);color:var(--gold);font-size:30px;display:block;margin-bottom:6px}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand"><span class="x">✕</span><b>Treasure Hunt</b><span>overlay &amp; change finder</span></div>
+  <div class="spacer"></div>
+  <span class="btn filebtn gold" id="addBtn" data-tip="Add one or more old maps (JPG, PNG, or PDF). Each becomes its own layer.">＋ Add maps
+    <input type="file" id="fileInput" accept="image/*,application/pdf" multiple />
+  </span>
+  <span class="btn filebtn" id="geoBtn" data-tip="Load your newer map as a GeoJSON reference. Everything else is aligned to this.">Reference (GeoJSON)
+    <input type="file" id="geoInput" accept=".json,.geojson,application/geo+json,application/json" />
+  </span>
+  <button class="btn" id="claudeBtn" data-tip="Chat with Claude for advice on aligning and extracting. Advisory only — connects inside Claude's app.">Ask Claude</button>
+  <button class="btn" id="helpBtn" data-tip="Open the full guide to every tool and option.">? Help</button>
+  <div class="base" id="base">
+    <button data-base="imagery" class="active" data-tip="Satellite imagery (Esri) — best for lining up aerial photos.">Satellite</button>
+    <button data-base="osm" data-tip="OpenStreetMap street basemap.">Streets</button>
+    <button data-base="none" data-tip="Blank canvas — hide the basemap.">None</button>
+  </div>
+</header>
+
+<div id="map"></div>
+
+<div class="welcome" id="welcome"><div>
+  <span class="x">✕</span>
+  <b>Load a GeoJSON reference and add your old maps.</b><br>
+  Each file becomes a layer you can fade, scale, rotate, and recolour. Extract the marked
+  rivers by colour, stack several maps in different colours, and use <b>Align</b> to lock each
+  one onto real-world coordinates.
+</div></div>
+
+<div class="tools">
+  <div class="toolgrid" id="toolgrid">
+    <button data-tool="move" class="active" data-tip="Drag the active layer to reposition it on the map."><span class="ic">✋</span>Move</button>
+    <button data-tool="sample" data-tip="Click a marking on the active map to sample its colour for extraction. Click several times for multiple shades."><span class="ic">🎯</span>Pick colour</button>
+    <button data-tool="coord" data-tip="Read live lat/lng at the cursor, and click to drop a pin with exact coordinates."><span class="ic">📍</span>Coordinates</button>
+    <button data-tool="align" data-tip="Georeference a layer: match two landmarks between the old map and the new one to solve scale, rotation, and position."><span class="ic">🧭</span>Align</button>
+    <button data-tool="draw" data-tip="Trace rivers or lakes by hand over the map. Points are captured in real coordinates and can be exported as GeoJSON."><span class="ic">✏️</span>Draw</button>
+  </div>
+  <div class="readout">
+    <div class="k">Cursor · lat, lng</div>
+    <div class="v" id="coordReadout">—</div>
+  </div>
+  <div class="hint" id="toolHint"><b>Move:</b> drag the active layer to reposition it.</div>
+
+  <div class="card" id="drawCard" style="display:none">
+    <div class="body">
+      <div class="seg" id="drawType">
+        <button data-dt="line" class="active" data-tip="Trace an open path — good for a river.">Line · river</button>
+        <button data-dt="area" data-tip="Trace a closed polygon — good for a lake or reservoir.">Area · lake</button>
+      </div>
+      <div class="ctl" style="margin:11px 0 9px" data-tip="Colour of the shape you're about to draw."><label for="drawColor">Draw colour</label><input type="color" id="drawColor" value="#ffd23f"></div>
+      <div class="row"><button class="btn" id="undoBtn" data-tip="Remove the last point you placed.">Undo point</button><button class="btn gold" id="finishBtn" data-tip="Save the current shape (or press Enter).">Finish</button></div>
+      <div class="row" style="margin-top:7px"><button class="btn" id="exportBtn" disabled data-tip="Download all traced shapes as a GeoJSON file for QGIS.">⤓ Export</button><button class="btn" id="clearBtn" data-tip="Delete all traced shapes.">Clear</button></div>
+      <div class="tiny" id="drawInfo">0 saved</div>
+    </div>
+  </div>
+</div>
+
+<div class="panel">
+  <div class="card" id="layersCard">
+    <h2><span>Layers</span><span id="layerCount">0</span></h2>
+    <div class="body" id="layerList">
+      <div class="empty-layers">No maps yet.<br>Use “＋ Add maps”.</div>
+    </div>
+  </div>
+
+  <div class="card" id="settingsCard">
+    <h2><span>Layer settings</span><span id="activeName">—</span></h2>
+    <div class="body" id="settingsBody">
+      <div class="no-active" id="noActive">Select a layer to edit it.</div>
+
+      <div id="settings" style="display:none">
+        <div class="ctl" data-tip="Opacity of this layer — fade it to see the map underneath.">
+          <label>Fade <var id="opVal">100%</var></label>
+          <input type="range" id="opacity" min="0" max="100" value="100">
+        </div>
+        <div class="ctl" data-tip="Resize this map larger or smaller over the ground.">
+          <label>Scale <var id="scVal">100%</var></label>
+          <input type="range" id="scale" min="5" max="600" value="100">
+        </div>
+        <div class="ctl" data-tip="Rotate this map to match the orientation of the reference.">
+          <label>Rotate <var id="roVal">0°</var></label>
+          <input type="range" id="rotate" min="-180" max="180" value="0">
+        </div>
+        <div class="row">
+          <button class="btn" id="fitImg" data-tip="Move this layer's centre to the middle of the current view.">Centre here</button>
+          <button class="btn" id="alignBtn" data-tip="Start the two-point alignment wizard for this layer.">Align to map</button>
+        </div>
+
+        <div class="subhead">Extract markings</div>
+        <div class="seg" id="modeRow">
+          <button data-mode="photo" class="active" data-tip="Show the original map image.">Map</button>
+          <button data-mode="extract" data-tip="Show only the extracted colour; hide the rest of the map.">Marks only</button>
+          <button data-mode="both" data-tip="Highlight the extracted colour over a dimmed map.">Both</button>
+        </div>
+        <div class="ctl" style="margin-top:11px" data-tip="The colours being extracted. Click a chip's × to remove it.">
+          <label>Colours to extract</label>
+          <div class="chips" id="chips"></div>
+          <button class="btn" id="pickBtn" style="width:100%;justify-content:center;font-size:12px;padding:8px" data-tip="Then click a marking on the map to sample its colour. Add several shades if the scan is uneven.">🎯 Pick a colour from this map</button>
+        </div>
+        <div class="ctl" data-tip="How loosely a pixel must match a sampled colour. Higher catches more; lower is stricter.">
+          <label>Tolerance <var id="tolVal">80</var></label>
+          <input type="range" id="tol" min="0" max="200" value="80">
+        </div>
+        <div class="ctl" style="margin-bottom:0" data-tip="The colour the extracted markings are drawn in. Give each map a distinct colour.">
+          <label for="hl">Show marks in</label>
+          <input type="color" id="hl" value="#ff4d4d">
+        </div>
+        <div class="tiny">Tip: pick several shades of the same river if the scan is uneven, and give each map its own “show marks in” colour so overlaps stay readable.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="banner" id="banner"><span id="bannerText"></span><button id="bannerCancel">Cancel</button></div>
+
+<div class="chat" id="chat">
+  <header><b>Claude</b><span style="font-size:11px;color:var(--ink-dim)">alignment guide</span><button class="close" id="chatClose">✕</button></header>
+  <div class="log" id="chatLog">
+    <div class="msg sys">I can advise on how to line up your maps — which features make good control points, how to read a bad fit, how to tune the colour extraction. I can’t see your images, so I’ll guide the Align tool rather than move things myself.</div>
+  </div>
+  <div class="in"><input id="chatInput" placeholder="Ask about aligning or extracting…" /><button id="chatSend">Send</button></div>
+</div>
+
+<div id="tip"></div>
+
+<div class="modal" id="help">
+  <div class="sheet">
+    <div class="hd"><span class="x">✕</span><b>Treasure Hunt — Guide</b><button class="close" id="helpClose">Close ✕</button></div>
+    <div class="content">
+      <h3>What it does</h3>
+      <p>Overlay old maps (scanned photos, JPG, PNG, PDF) onto a newer GeoJSON reference, isolate marked features by colour, align everything to real coordinates, and trace features into exportable GeoJSON.</p>
+
+      <h3>Loading data</h3>
+      <ul>
+        <li><b>Reference (GeoJSON)</b> — your baseline "new" map. The view zooms to fit it.</li>
+        <li><b>＋ Add maps</b> — add one or more old maps (JPG / PNG / PDF). Each becomes a layer. PDFs import page 1 only.</li>
+      </ul>
+
+      <h3>Layers panel (right)</h3>
+      <ul>
+        <li><b>Colour swatch</b> — the colour this map's extracted marks appear in.</li>
+        <li><b>Eye</b> — show / hide the layer.</li>
+        <li><b>Name</b> — click to make a layer active. Only the active layer can be moved or edited.</li>
+        <li><b>✕</b> — remove the layer.</li>
+      </ul>
+
+      <h3>Layer settings</h3>
+      <ul>
+        <li><b>Fade</b> — layer opacity (your light-table dimmer).</li>
+        <li><b>Scale / Rotate</b> — resize and spin the map over the ground.</li>
+        <li><b>Centre here</b> — snap the layer to the middle of the view if it drifts off-screen.</li>
+        <li><b>Extract markings</b> — <b>Map</b> shows the original; <b>Marks only</b> shows just the extracted colour; <b>Both</b> highlights marks over a dimmed map.</li>
+        <li><b>Pick a colour</b>, then click a marking to sample it — add several shades. <b>Tolerance</b> loosens or tightens the match. <b>Show marks in</b> sets the output colour.</li>
+      </ul>
+
+      <h3>Tools (bottom-left)</h3>
+      <ul>
+        <li><b>Move</b> — drag the active layer.</li>
+        <li><b>Pick colour</b> — sample marking colours for extraction.</li>
+        <li><b>Coordinates</b> — live lat/lng at the cursor; click to drop a pin with exact coordinates.</li>
+        <li><b>Align</b> — the reliable georeferencing tool. Click a landmark on the old map, then the same spot on the new map; repeat for a second landmark far away. Scale, rotation, and position are solved. If rotation comes out flipped, correct it with the Rotate slider.</li>
+        <li><b>Draw</b> — trace features by hand. Choose Line (river) or Area (lake), click to place points, <b>Undo point</b> / <b>Finish</b> (Enter) / Esc to discard. <b>Export</b> saves everything as GeoJSON; <b>Clear</b> wipes it. Because you draw on the map, the output is already in real coordinates.</li>
+      </ul>
+
+      <h3>Basemaps</h3>
+      <p><b>Satellite</b> (best for aligning aerial photos), <b>Streets</b>, or <b>None</b>.</p>
+
+      <h3>Ask Claude</h3>
+      <p>Advisory chat about aligning and extracting. It doesn't move your maps, and connects only inside Claude's own environment — hosted elsewhere it shows an offline note. Everything else works fully in the browser.</p>
+
+      <h3>Recommended order</h3>
+      <p>Load reference → add old maps → rough-place with Move/Scale/Rotate → Align each precisely → extract markings by colour → trace with Draw → Export to GeoJSON.</p>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script>
+(function(){
+  "use strict";
+  const $=id=>document.getElementById(id);
+  if(window.pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc='https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+  const MAXDIM=1600;
+  const SM=L.Projection.SphericalMercator;
+  const prj=ll=>SM.project(ll), unprj=p=>SM.unproject(p);
+  const mpp=(lat,zoom)=>156543.03392*Math.cos(lat*Math.PI/180)/Math.pow(2,zoom);
+  const hexRgb=h=>{const n=parseInt(h.slice(1),16);return{r:(n>>16)&255,g:(n>>8)&255,b:n&255};};
+  const rgbCss=c=>'rgb('+c.r+','+c.g+','+c.b+')';
+
+  // ---- base map ----
+  const map=L.map('map',{zoomControl:true,zoomAnimation:false,zoomSnap:0.5}).setView([23.78,90.40],11);
+  L.control.scale({imperial:false}).addTo(map);
+  map.createPane('ovPane'); map.getPane('ovPane').style.zIndex=650; map.getPane('ovPane').style.pointerEvents='none';
+  map.createPane('drawPane'); map.getPane('drawPane').style.zIndex=660;
+  const drawRenderer=L.svg({pane:'drawPane'});
+  const bases={
+    imagery:L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{maxZoom:20,attribution:'Esri World Imagery'}),
+    osm:L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OpenStreetMap'})
+  };
+  let curBase=bases.imagery.addTo(map);
+  $('base').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;
+    document.querySelectorAll('#base button').forEach(x=>x.classList.remove('active'));b.classList.add('active');
+    if(curBase){map.removeLayer(curBase);curBase=null;} if(bases[b.dataset.base])curBase=bases[b.dataset.base].addTo(map);});
+
+  // ---- reference GeoJSON ----
+  let geoLayer=null, geoInfo=null;
+  $('geoInput').addEventListener('change',ev=>{const f=ev.target.files[0];if(!f)return;const r=new FileReader();
+    r.onload=()=>{let d;try{d=JSON.parse(r.result);}catch(e){alert("That file isn't valid GeoJSON.");return;}
+      if(geoLayer)map.removeLayer(geoLayer);
+      geoLayer=L.geoJSON(d,{style:f=>{const g=(f.geometry&&f.geometry.type)||'';return g.indexOf('Polygon')>=0
+          ?{color:'#4fb0ff',weight:2,fillColor:'#4fb0ff',fillOpacity:.25}:{color:'#4fb0ff',weight:2};},
+        pointToLayer:(f,ll)=>L.circleMarker(ll,{radius:4,color:'#4fb0ff',fillOpacity:.6})}).addTo(map);
+      try{const b=geoLayer.getBounds();map.fitBounds(b,{padding:[40,40]});geoInfo={bounds:b,center:b.getCenter()};}catch(e){}
+      $('geoBtn').classList.add('gold'); dropWelcome();
+    }; r.readAsText(f);});
+
+  // ---- layer model ----
+  let layers=[], activeId=null, seq=0, tool='move';
+  let buildPending=null;
+  const activeLayer=()=>layers.find(l=>l.id===activeId)||null;
+
+  function addImageSource(imgSource, url, name){
+    const ly={ id:++seq, name:name||('Map '+seq), img:null, url:url,
+      srcData:null, srcW:0, srcH:0, aspect:imgSource.naturalWidth/imgSource.naturalHeight||1,
+      center:map.getCenter(), baseWidthM:0, scale:1, rotate:0, opacity:1, visible:true, z:seq,
+      ext:{mode:'photo',targets:[],tol:80,highlight:pickHighlight()} };
+    // seed size ~55% of current view width
+    const bb=map.getBounds(); ly.baseWidthM=map.distance(bb.getNorthWest(),bb.getNorthEast())*0.55;
+    // capture pixels (scaled)
+    const f=Math.min(1,MAXDIM/Math.max(imgSource.naturalWidth,imgSource.naturalHeight));
+    ly.srcW=Math.max(1,Math.round(imgSource.naturalWidth*f)); ly.srcH=Math.max(1,Math.round(imgSource.naturalHeight*f));
+    const c=document.createElement('canvas'); c.width=ly.srcW; c.height=ly.srcH;
+    const cx=c.getContext('2d',{willReadFrequently:true}); cx.drawImage(imgSource,0,0,ly.srcW,ly.srcH);
+    ly.srcData=cx.getImageData(0,0,ly.srcW,ly.srcH).data;
+    // dom element
+    const img=document.createElement('img'); img.className='ov'; img.draggable=false; img.style.zIndex=ly.z;
+    img.src=url; ly.img=img; map.getPane('ovPane').appendChild(img);
+    attachImgHandlers(ly);
+    layers.push(ly); setActive(ly.id); rebuildLayerList(); renderAll(); dropWelcome();
+  }
+  const HL_CYCLE=['#ff4d4d','#ffd23f','#4dff88','#c56bff','#ff8a3d','#3dd4ff'];
+  function pickHighlight(){ return HL_CYCLE[layers.length % HL_CYCLE.length]; }
+
+  function loadFiles(files){
+    Array.from(files).forEach(file=>{
+      if(file.type==='application/pdf'){
+        rasterizePDF(file).then(dataUrl=>{ const im=new Image(); im.onload=()=>addImageSource(im,dataUrl,file.name.replace(/\.pdf$/i,'')); im.src=dataUrl; })
+          .catch(()=>alert('Could not read PDF: '+file.name));
+      } else if(file.type.indexOf('image/')===0){
+        const url=URL.createObjectURL(file); const im=new Image();
+        im.onload=()=>addImageSource(im,url,file.name.replace(/\.[^.]+$/,'')); im.src=url;
+      }
+    });
+  }
+  async function rasterizePDF(file){
+    const buf=await file.arrayBuffer(); const pdf=await pdfjsLib.getDocument({data:buf}).promise;
+    const page=await pdf.getPage(1); const v0=page.getViewport({scale:1});
+    const s=Math.min(2.5,MAXDIM/Math.max(v0.width,v0.height)); const vp=page.getViewport({scale:s});
+    const c=document.createElement('canvas'); c.width=vp.width; c.height=vp.height;
+    await page.render({canvasContext:c.getContext('2d'),viewport:vp}).promise; return c.toDataURL();
+  }
+  $('fileInput').addEventListener('change',e=>{loadFiles(e.target.files); e.target.value='';});
+
+  // ---- rendering ----
+  function renderLayer(ly){
+    const img=ly.img; if(!ly.center){return;}
+    if(!ly.visible){img.style.display='none';return;} img.style.display='block';
+    const zoom=map.getZoom(), wM=ly.baseWidthM*ly.scale;
+    const pxW=wM/mpp(ly.center.lat,zoom), pxH=pxW/ly.aspect;
+    const p=map.latLngToLayerPoint(ly.center);
+    img.style.width=pxW+'px'; img.style.height=pxH+'px';
+    img.style.left=(p.x-pxW/2)+'px'; img.style.top=(p.y-pxH/2)+'px';
+    img.style.transform='rotate('+ly.rotate+'deg)'; img.style.opacity=ly.opacity; img.style.zIndex=ly.z;
+    const wantImg=(tool==='align'&&align.active&&align.phase%2===1);
+    const interactive=(ly.id===activeId)&&(tool==='move'||tool==='sample'||wantImg);
+    img.style.pointerEvents=interactive?'auto':'none';
+    img.style.cursor=tool==='sample'?'crosshair':(tool==='move'?'grab':(wantImg?'crosshair':'default'));
+  }
+  function renderAll(){ layers.forEach(renderLayer); }
+  map.on('move zoom zoomend viewreset resize',renderAll);
+
+  // ---- image pointer handlers (drag / sample / align-image) ----
+  function attachImgHandlers(ly){
+    const img=ly.img; let drag=null;
+    img.addEventListener('pointerdown',e=>{
+      if(ly.id!==activeId) return;
+      if(tool==='sample'){ e.preventDefault();e.stopPropagation(); addTarget(ly,e.clientX,e.clientY); return; }
+      if(tool==='align'&&align.active&&align.phase%2===1){ e.preventDefault();e.stopPropagation(); captureAlignImg(ly,e.clientX,e.clientY); return; }
+      if(tool!=='move') return;
+      e.preventDefault();e.stopPropagation(); img.setPointerCapture(e.pointerId); img.classList.add('dragging');
+      const s=map.latLngToContainerPoint(ly.center); drag={sx:e.clientX,sy:e.clientY,cx:s.x,cy:s.y};
+    });
+    img.addEventListener('pointermove',e=>{ if(!drag)return; const nx=drag.cx+(e.clientX-drag.sx),ny=drag.cy+(e.clientY-drag.sy);
+      ly.center=map.containerPointToLatLng([nx,ny]); renderLayer(ly); });
+    const end=()=>{ if(drag){drag=null; img.classList.remove('dragging');} };
+    img.addEventListener('pointerup',end); img.addEventListener('pointercancel',end);
+  }
+
+  // convert a screen click to image fraction (accounts for scale+rotation)
+  function clientToFrac(ly,cx,cy){
+    const r=ly.img.getBoundingClientRect(); const ox=r.left+r.width/2, oy=r.top+r.height/2;
+    const dW=parseFloat(ly.img.style.width)||r.width, dH=parseFloat(ly.img.style.height)||r.height;
+    const th=ly.rotate*Math.PI/180, dx=cx-ox, dy=cy-oy;
+    const rx=dx*Math.cos(th)+dy*Math.sin(th), ry=-dx*Math.sin(th)+dy*Math.cos(th);
+    return {fx:rx/dW+0.5, fy:ry/dH+0.5};
+  }
+
+  // ---- colour extraction ----
+  function addTarget(ly,cx,cy){
+    const {fx,fy}=clientToFrac(ly,cx,cy); if(fx<0||fx>1||fy<0||fy>1) return;
+    const sx=Math.min(ly.srcW-1,Math.floor(fx*ly.srcW)), sy=Math.min(ly.srcH-1,Math.floor(fy*ly.srcH));
+    const i=(sy*ly.srcW+sx)*4; ly.ext.targets.push({r:ly.srcData[i],g:ly.srcData[i+1],b:ly.srcData[i+2]});
+    if(ly.ext.mode==='photo'){ ly.ext.mode='both'; syncModeButtons(ly); }
+    renderChips(ly); applyLayerSrc(ly);
+  }
+  function buildProcessed(ly){
+    const t=ly.ext, tol2=t.tol*t.tol, hl=hexRgb(t.highlight), both=t.mode==='both', tg=t.targets;
+    const out=document.createElement('canvas'); out.width=ly.srcW; out.height=ly.srcH;
+    const octx=out.getContext('2d'); const od=octx.createImageData(ly.srcW,ly.srcH); const o=od.data, s=ly.srcData;
+    for(let i=0;i<s.length;i+=4){
+      const r=s[i],g=s[i+1],b=s[i+2]; let hit=false;
+      for(let k=0;k<tg.length;k++){ const dr=r-tg[k].r,dg=g-tg[k].g,db=b-tg[k].b; if(dr*dr+dg*dg+db*db<=tol2){hit=true;break;} }
+      if(hit){ o[i]=hl.r;o[i+1]=hl.g;o[i+2]=hl.b;o[i+3]=255; }
+      else if(both){ o[i]=r;o[i+1]=g;o[i+2]=b;o[i+3]=128; }
+      else { o[i+3]=0; }
+    }
+    octx.putImageData(od,0,0); return out.toDataURL();
+  }
+  function applyLayerSrc(ly){ if(ly.ext.mode==='photo'){ ly.img.src=ly.url; } else { ly.img.src=buildProcessed(ly); } }
+  function scheduleBuild(ly){ if(ly.ext.mode==='photo')return; if(buildPending)cancelAnimationFrame(buildPending);
+    buildPending=requestAnimationFrame(()=>{buildPending=null; applyLayerSrc(ly);}); }
+
+  // ---- layer list & settings UI ----
+  function rebuildLayerList(){
+    const box=$('layerList'); $('layerCount').textContent=layers.length;
+    if(!layers.length){ box.innerHTML='<div class="empty-layers">No maps yet.<br>Use “＋ Add maps”.</div>'; return; }
+    box.innerHTML='';
+    layers.forEach(ly=>{
+      const row=document.createElement('div'); row.className='layer'+(ly.id===activeId?' active':'');
+      row.innerHTML='<span class="sw" style="background:'+ly.ext.highlight+'"></span>'+
+        '<button class="eye'+(ly.visible?'':' off')+'" data-tip="Show or hide this layer.">'+(ly.visible?'👁':'🚫')+'</button>'+
+        '<span class="nm" data-tip="Click to select this layer for editing.">'+ly.name+'</span><button class="del" data-tip="Remove this layer.">✕</button>';
+      row.querySelector('.nm').addEventListener('click',()=>setActive(ly.id));
+      row.querySelector('.sw').addEventListener('click',()=>setActive(ly.id));
+      row.querySelector('.eye').addEventListener('click',ev=>{ev.stopPropagation();ly.visible=!ly.visible;renderLayer(ly);rebuildLayerList();});
+      row.querySelector('.del').addEventListener('click',ev=>{ev.stopPropagation();removeLayer(ly.id);});
+      box.appendChild(row);
+    });
+  }
+  function removeLayer(id){ const i=layers.findIndex(l=>l.id===id); if(i<0)return;
+    map.getPane('ovPane').removeChild(layers[i].img); layers.splice(i,1);
+    if(activeId===id) activeId=layers.length?layers[Math.max(0,i-1)].id:null;
+    rebuildLayerList(); loadSettings(); renderAll(); if(!layers.length&&!geoLayer)$('welcome').style.display='flex'; }
+
+  function setActive(id){ activeId=id; rebuildLayerList(); loadSettings(); renderAll(); }
+  function loadSettings(){
+    const ly=activeLayer();
+    if(!ly){ $('settings').style.display='none'; $('noActive').style.display='block'; $('activeName').textContent='—'; return; }
+    $('noActive').style.display='none'; $('settings').style.display='block'; $('activeName').textContent=ly.name;
+    $('opacity').value=Math.round(ly.opacity*100); $('opVal').textContent=Math.round(ly.opacity*100)+'%';
+    $('scale').value=Math.round(ly.scale*100); $('scVal').textContent=Math.round(ly.scale*100)+'%';
+    $('rotate').value=Math.round(ly.rotate); $('roVal').textContent=Math.round(ly.rotate)+'°';
+    $('tol').value=ly.ext.tol; $('tolVal').textContent=ly.ext.tol; $('hl').value=ly.ext.highlight;
+    syncModeButtons(ly); renderChips(ly);
+  }
+  function syncModeButtons(ly){ document.querySelectorAll('#modeRow button').forEach(b=>b.classList.toggle('active',b.dataset.mode===ly.ext.mode)); }
+  function renderChips(ly){ const box=$('chips'); box.innerHTML='';
+    if(!ly.ext.targets.length){ box.innerHTML='<span style="font-size:11px;color:var(--ink-dim)">none yet — pick a colour below</span>'; return; }
+    ly.ext.targets.forEach((c,idx)=>{ const chip=document.createElement('span'); chip.className='chip';
+      chip.innerHTML='<span class="c" style="background:'+rgbCss(c)+'"></span><button title="remove">✕</button>';
+      chip.querySelector('button').addEventListener('click',()=>{ly.ext.targets.splice(idx,1);renderChips(ly);applyLayerSrc(ly);});
+      box.appendChild(chip); }); }
+
+  // settings control events (act on active layer)
+  $('opacity').addEventListener('input',e=>{const ly=activeLayer();if(!ly)return;ly.opacity=e.target.value/100;$('opVal').textContent=e.target.value+'%';renderLayer(ly);});
+  $('scale').addEventListener('input',e=>{const ly=activeLayer();if(!ly)return;ly.scale=e.target.value/100;$('scVal').textContent=e.target.value+'%';renderLayer(ly);});
+  $('rotate').addEventListener('input',e=>{const ly=activeLayer();if(!ly)return;ly.rotate=+e.target.value;$('roVal').textContent=e.target.value+'°';renderLayer(ly);});
+  $('fitImg').addEventListener('click',()=>{const ly=activeLayer();if(!ly)return;ly.center=map.getCenter();renderLayer(ly);});
+  $('modeRow').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;const ly=activeLayer();if(!ly)return;
+    ly.ext.mode=b.dataset.mode;syncModeButtons(ly);applyLayerSrc(ly);});
+  $('tol').addEventListener('input',e=>{const ly=activeLayer();if(!ly)return;ly.ext.tol=+e.target.value;$('tolVal').textContent=e.target.value;scheduleBuild(ly);});
+  $('hl').addEventListener('input',e=>{const ly=activeLayer();if(!ly)return;ly.ext.highlight=e.target.value;rebuildLayerList();scheduleBuild(ly);});
+  $('pickBtn').addEventListener('click',()=>setTool('sample'));
+  $('alignBtn').addEventListener('click',()=>startAlign());
+
+  // ---- tools ----
+  const HINTS={move:'<b>Move:</b> drag the active layer to reposition it.',
+    sample:'<b>Pick colour:</b> click a marking on the active map to add it. Keep clicking to add shades.',
+    coord:'<b>Coordinates:</b> click anywhere to drop a pin and read its real lat / lng.',
+    align:'<b>Align:</b> pick a layer, then follow the prompts — click a landmark on the old map, then the same spot on the new one.',
+    draw:'<b>Draw:</b> click along a river or shore to trace it. Finish to save, then Export as GeoJSON.'};
+  function setTool(t){
+    if(tool==='draw'&&t!=='draw') finishOrDiscard();
+    tool=t;
+    document.querySelectorAll('#toolgrid button').forEach(b=>b.classList.toggle('active',b.dataset.tool===t));
+    $('toolHint').innerHTML=HINTS[t]||''; if(t!=='align')cancelAlign();
+    $('drawCard').style.display=(t==='draw')?'block':'none';
+    if(t==='draw'){ map.doubleClickZoom.disable(); } else { map.doubleClickZoom.enable(); }
+    renderAll();
+  }
+  $('toolgrid').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return; if(b.dataset.tool==='align'){startAlign();}else setTool(b.dataset.tool);});
+
+  // ---- coordinate pin + cursor readout ----
+  let coordMarker=null;
+  const mapC=map.getContainer();
+  mapC.addEventListener('mousemove',e=>{ try{const ll=map.mouseEventToLatLng(e); $('coordReadout').textContent=ll.lat.toFixed(5)+', '+ll.lng.toFixed(5);}catch(_){} });
+  map.on('click',e=>{
+    const ll=e.latlng;
+    if(tool==='coord'){
+      if(!coordMarker){ coordMarker=L.marker(ll,{draggable:true}).addTo(map);
+        coordMarker.on('move',()=>coordMarker.setPopupContent(popupHtml(coordMarker.getLatLng())).openPopup()); }
+      else coordMarker.setLatLng(ll);
+      coordMarker.bindPopup(popupHtml(ll)).openPopup();
+    } else if(tool==='align'&&align.active&&align.phase%2===0){ captureAlignMap(ll); }
+    else if(tool==='draw'){ addDrawPoint(ll); }
+  });
+  function popupHtml(ll){ return '<div style="font-family:var(--mono);font-size:12px">Lat '+ll.lat.toFixed(6)+'<br>Lng '+ll.lng.toFixed(6)+'</div>'; }
+
+  // ---- control-point alignment (2 points -> similarity solve) ----
+  const align={active:false,phase:0,pairs:[],tmp:null,layerId:null};
+  function startAlign(){ const ly=activeLayer(); if(!ly){alert('Add and select a layer first.');return;}
+    setToolButtons('align'); tool='align'; $('toolHint').innerHTML=HINTS.align;
+    align.active=true; align.phase=1; align.pairs=[]; align.tmp=null; align.layerId=ly.id;
+    showBanner(); renderAll(); }
+  function setToolButtons(t){ document.querySelectorAll('#toolgrid button').forEach(b=>b.classList.toggle('active',b.dataset.tool===t)); }
+  function cancelAlign(){ align.active=false; align.phase=0; align.pairs=[]; align.tmp=null; $('banner').style.display='none'; }
+  function showBanner(){ const steps=['','Click a landmark on the OLD map','Now click the SAME spot on the map below',
+      'Click a SECOND landmark on the OLD map','Now click that SAME second spot on the map below'];
+    $('bannerText').textContent='Align · '+steps[align.phase]; $('banner').style.display='flex'; }
+  $('bannerCancel').addEventListener('click',()=>{cancelAlign();setTool('move');});
+
+  function captureAlignImg(ly,cx,cy){ const f=clientToFrac(ly,cx,cy); if(f.fx<0||f.fx>1||f.fy<0||f.fy>1)return;
+    align.tmp={fx:f.fx,fy:f.fy}; align.phase++; showBanner(); renderAll(); }
+  function captureAlignMap(ll){ const m=prj(ll); align.pairs.push({fx:align.tmp.fx,fy:align.tmp.fy,mx:m.x,my:m.y}); align.tmp=null;
+    if(align.pairs.length>=2){ solveAlign(); } else { align.phase++; showBanner(); renderAll(); } }
+
+  function solveAlign(){ const ly=layers.find(l=>l.id===align.layerId); const P=align.pairs;
+    const u0=P[0].fx-0.5, w0=(P[0].fy-0.5)/ly.aspect, u1=P[1].fx-0.5, w1=(P[1].fy-0.5)/ly.aspect;
+    const du=u0-u1, dw=w0-w1, dX=P[0].mx-P[1].mx, dY=P[0].my-P[1].my, det=du*du+dw*dw;
+    if(Math.abs(det)<1e-9){ alert('Those two points were too close together — try again with points farther apart.'); cancelAlign(); setTool('move'); return; }
+    const A=(du*dX - dw*dY)/det, B=(dw*dX + du*dY)/det;
+    const Cx=P[0].mx - A*u0 - B*w0, Cy=P[0].my - B*u0 + A*w0;
+    const W=Math.hypot(A,B), theta=Math.atan2(B,A);
+    ly.center=unprj(L.point(Cx,Cy)); ly.baseWidthM=W; ly.scale=1;
+    let deg=-theta*180/Math.PI; while(deg>180)deg-=360; while(deg<-180)deg+=360; ly.rotate=deg;
+    cancelAlign(); setActive(ly.id); setTool('move'); renderLayer(ly);
+    map.panTo(ly.center);
+  }
+
+  // ---- manual drawing + export ----
+  let drawings=[], cur=null, drawType='line', drawColor='#ffd23f';
+  const PATHOPT=()=>({renderer:drawRenderer,color:cur.color,weight:3,interactive:false});
+  function addDrawPoint(ll){ if(!cur)cur={type:drawType,color:drawColor,latlngs:[],line:null,poly:null,verts:[]}; cur.latlngs.push(ll); redrawCur(); }
+  function clearTemp(){ if(!cur)return; if(cur.line){map.removeLayer(cur.line);cur.line=null;} if(cur.poly){map.removeLayer(cur.poly);cur.poly=null;} cur.verts.forEach(m=>map.removeLayer(m)); cur.verts=[]; }
+  function redrawCur(){ if(!cur)return; clearTemp();
+    if(cur.type==='area'&&cur.latlngs.length>=3) cur.poly=L.polygon(cur.latlngs,Object.assign(PATHOPT(),{fillOpacity:.15})).addTo(map);
+    if(cur.latlngs.length>=2) cur.line=L.polyline(cur.latlngs,PATHOPT()).addTo(map);
+    cur.latlngs.forEach(p=>cur.verts.push(L.circleMarker(p,{renderer:drawRenderer,radius:4,color:cur.color,fillColor:'#fff',fillOpacity:1,weight:2,interactive:false}).addTo(map)));
+    updateDrawInfo(); }
+  function finishDraw(){ if(!cur)return false; const min=cur.type==='area'?3:2;
+    if(cur.latlngs.length<min){ alert('Add at least '+min+' points, then Finish.'); return false; }
+    clearTemp();
+    const fin=cur.type==='area'?L.polygon(cur.latlngs,Object.assign(PATHOPT(),{fillOpacity:.2})).addTo(map):L.polyline(cur.latlngs,PATHOPT()).addTo(map);
+    drawings.push({type:cur.type,color:cur.color,latlngs:cur.latlngs.slice(),layer:fin}); cur=null; updateDrawInfo(); return true; }
+  function discardCur(){ if(cur){clearTemp();cur=null;updateDrawInfo();} }
+  function finishOrDiscard(){ if(!cur)return; const min=cur.type==='area'?3:2; if(cur.latlngs.length>=min)finishDraw(); else discardCur(); }
+  function undoPoint(){ if(cur&&cur.latlngs.length){ cur.latlngs.pop(); cur.latlngs.length?redrawCur():clearTemp(); } updateDrawInfo(); }
+  function clearAllDraw(){ discardCur(); drawings.forEach(d=>map.removeLayer(d.layer)); drawings=[]; updateDrawInfo(); }
+  function updateDrawInfo(){ const el=$('drawInfo'); if(el)el.textContent=drawings.length+' saved'+(cur?' · drawing…':''); const ex=$('exportBtn'); if(ex)ex.disabled=!drawings.length; }
+  function exportGeoJSON(){ if(!drawings.length){alert('Nothing to export yet — trace something first.');return;}
+    const feats=drawings.map(d=>{ const c=d.latlngs.map(p=>[+p.lng.toFixed(8),+p.lat.toFixed(8)]);
+      const geom=d.type==='area'?{type:'Polygon',coordinates:[c.concat([c[0]])]}:{type:'LineString',coordinates:c};
+      return {type:'Feature',properties:{kind:d.type,color:d.color},geometry:geom}; });
+    const blob=new Blob([JSON.stringify({type:'FeatureCollection',features:feats},null,2)],{type:'application/geo+json'});
+    const a=document.createElement('a'); a.href=URL.createObjectURL(blob); a.download='treasure-hunt.geojson'; document.body.appendChild(a); a.click(); a.remove(); }
+
+  $('drawType').addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;
+    document.querySelectorAll('#drawType button').forEach(x=>x.classList.remove('active'));b.classList.add('active');
+    if(cur){finishOrDiscard();} drawType=b.dataset.dt;});
+  $('drawColor').addEventListener('input',e=>{drawColor=e.target.value; if(cur){cur.color=drawColor;redrawCur();}});
+  $('undoBtn').addEventListener('click',undoPoint);
+  $('finishBtn').addEventListener('click',finishDraw);
+  $('exportBtn').addEventListener('click',exportGeoJSON);
+  $('clearBtn').addEventListener('click',()=>{ if(drawings.length&&confirm('Remove all drawn shapes?'))clearAllDraw(); else if(!drawings.length)discardCur(); });
+  document.addEventListener('keydown',e=>{
+    if(e.key==='Escape'){ if($('help').style.display==='flex'){$('help').style.display='none';return;} }
+    const t=(e.target.tagName||''); if(t==='INPUT'||t==='TEXTAREA')return;
+    if(tool==='draw'&&e.key==='Enter')finishDraw(); if(tool==='draw'&&e.key==='Escape')discardCur(); });
+
+  // ---- hover tooltips + help modal ----
+  const tipEl=$('tip');
+  document.addEventListener('mouseover',e=>{ const el=e.target.closest('[data-tip]'); if(!el)return;
+    const txt=el.getAttribute('data-tip'); if(!txt)return; tipEl.textContent=txt; tipEl.style.display='block';
+    const r=el.getBoundingClientRect(); const tw=tipEl.offsetWidth, th=tipEl.offsetHeight;
+    let left=r.left+r.width/2-tw/2, top=r.bottom+8;
+    if(top+th>window.innerHeight-6) top=r.top-th-8;
+    left=Math.max(6,Math.min(left,window.innerWidth-tw-6)); tipEl.style.left=left+'px'; tipEl.style.top=Math.max(6,top)+'px'; });
+  document.addEventListener('mouseout',e=>{ const el=e.target.closest('[data-tip]'); if(!el)return; if(el.contains(e.relatedTarget))return; tipEl.style.display='none'; });
+  document.addEventListener('mousedown',()=>{ tipEl.style.display='none'; });
+  $('helpBtn').addEventListener('click',()=>{ $('help').style.display='flex'; });
+  $('helpClose').addEventListener('click',()=>{ $('help').style.display='none'; });
+  $('help').addEventListener('click',e=>{ if(e.target.id==='help')$('help').style.display='none'; });
+
+  // ---- Ask Claude (advisory, graceful offline) ----
+  const chatHist=[];
+  $('claudeBtn').addEventListener('click',()=>{ const c=$('chat'); c.style.display=c.style.display==='flex'?'none':'flex'; });
+  $('chatClose').addEventListener('click',()=>$('chat').style.display='none');
+  function pushMsg(role,text){ const d=document.createElement('div'); d.className='msg '+(role==='user'?'u':(role==='sys'?'sys':'a')); d.textContent=text; $('chatLog').appendChild(d); $('chatLog').scrollTop=$('chatLog').scrollHeight; }
+  function ctxSummary(){ let s='Loaded overlay layers: '+(layers.map(l=>l.name).join(', ')||'none')+'. ';
+    s+='Reference GeoJSON: '+(geoInfo?('centred near '+geoInfo.center.lat.toFixed(3)+','+geoInfo.center.lng.toFixed(3)):'not loaded')+'. ';
+    return s; }
+  async function askClaude(q){
+    pushMsg('user',q); const input=$('chatInput'); input.value=''; input.disabled=true;
+    const thinking=document.createElement('div'); thinking.className='msg a'; thinking.textContent='…'; $('chatLog').appendChild(thinking);
+    chatHist.push({role:'user',content:q});
+    const sys="You are the alignment guide inside a web app called Treasure Hunt that overlays scanned historical maps/aerial photos onto a GeoJSON reference map. Users georeference by control points: click a landmark on the old map, then the same landmark on the new map, twice, and the app solves scale/rotation/position. They can also extract coloured markings (e.g. deep-blue rivers) by colour with a tolerance. You CANNOT see their images. Give short, concrete, practical guidance. Context: "+ctxSummary();
+    try{
+      const res=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({model:'claude-sonnet-4-6',max_tokens:1000,system:sys,messages:chatHist})});
+      if(!res.ok) throw new Error('http '+res.status);
+      const data=await res.json();
+      const text=(data.content||[]).filter(b=>b.type==='text').map(b=>b.text).join('\n').trim()||'(no reply)';
+      thinking.remove(); pushMsg('assistant',text); chatHist.push({role:'assistant',content:text});
+    }catch(err){
+      thinking.remove();
+      pushMsg('sys','Can’t reach Claude from here — the live assistant only connects when this app runs inside Claude’s environment. Meanwhile: for a good align, pick two landmarks that are far apart and unambiguous (a sharp river bend, a bridge, a road fork). Put your control points on those and the scale/rotation will lock in.');
+    }
+    input.disabled=false; input.focus();
+  }
+  $('chatSend').addEventListener('click',()=>{const q=$('chatInput').value.trim();if(q)askClaude(q);});
+  $('chatInput').addEventListener('keydown',e=>{if(e.key==='Enter'){const q=e.target.value.trim();if(q)askClaude(q);}});
+
+  function dropWelcome(){ if(layers.length||geoLayer)$('welcome').style.display='none'; }
+})();
+</script>
+</body>
+</html>
