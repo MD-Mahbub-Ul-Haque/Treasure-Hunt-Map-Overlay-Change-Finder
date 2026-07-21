@@ -1,9 +1,26 @@
 <!DOCTYPE html>
+<!--
+  ============================================================================
+  Treasure Hunt - Map Overlay & Change Finder
+  Developed with love by Mahbub (Md Mahbub Ul Haque)
+  Contact :  mahbub.ul.haque.official2022@gmail.com
+  Source  :  https://github.com/MD-Mahbub-Ul-Haque/Treasure-Hunt-Map-Overlay-Change-Finder
+  License :  MIT - free to use, modify, and share.
+  ============================================================================
+-->
 <html lang="en">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Treasure Hunt — map overlay & change finder</title>
+<title>Treasure Hunt — Map Overlay &amp; Change Finder</title>
+<meta name="description" content="Free browser tool to overlay old maps and aerial photos onto a live map, extract marked rivers and water bodies by colour, align them to real-world coordinates, trace features, and export GeoJSON for QGIS." />
+<meta name="keywords" content="map overlay, georeferencing, water body change, aerial photo, GeoJSON export, QGIS, river tracing, historical maps" />
+<link rel="canonical" href="https://md-mahbub-ul-haque.github.io/Treasure-Hunt-Map-Overlay-Change-Finder/" />
+<meta property="og:title" content="Treasure Hunt — Map Overlay &amp; Change Finder" />
+<meta property="og:description" content="Overlay old maps on a live map, extract water bodies by colour, align to real coordinates, and export GeoJSON — free, in your browser." />
+<meta property="og:type" content="website" />
+<meta property="og:url" content="https://md-mahbub-ul-haque.github.io/Treasure-Hunt-Map-Overlay-Change-Finder/" />
+<meta name="twitter:card" content="summary" />
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
 <style>
   :root{
@@ -45,6 +62,13 @@
 
   #map{flex:1 1 auto;background:#0b0d09}
   .leaflet-container{background:#0b0d09}
+
+  /* developer signature */
+  .sig{position:fixed;left:50%;transform:translateX(-50%);bottom:6px;z-index:900;font-size:11px;
+       color:var(--ink-dim);background:rgba(18,20,15,.6);padding:3px 10px;border-radius:7px;white-space:nowrap}
+  .sig span{color:#ff6b6b}
+  .sig a{color:var(--gold);text-decoration:none}
+  .sig a:hover{text-decoration:underline}
 
   /* hover tooltip */
   #tip{position:fixed;z-index:3000;display:none;pointer-events:none;max-width:230px;background:#0c0e08;
@@ -277,6 +301,8 @@
   </div>
   <div class="in"><input id="chatInput" placeholder="Ask about aligning or extracting…" /><button id="chatSend">Send</button></div>
 </div>
+
+<div class="sig">made with <span>&#10084;</span> by Mahbub &middot; <a href="mailto:mahbub.ul.haque.official2022@gmail.com">mahbub.ul.haque.official2022@gmail.com</a></div>
 
 <div id="tip"></div>
 
